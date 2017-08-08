@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/github/orchestrator/go/agent"
+	"github.com/github/orchestrator/go/caretaker"
 	"github.com/github/orchestrator/go/collection"
 	"github.com/github/orchestrator/go/config"
 	"github.com/github/orchestrator/go/http"
@@ -126,6 +127,10 @@ func standardHttp(continuousDiscovery bool) {
 
 		log.Info("Starting Discovery")
 		go logic.ContinuousDiscovery()
+
+		// start caretaker functionality
+		c := caretaker.NewCaretaker()
+		go c.Run()
 	}
 	log.Info("Registering endpoints")
 	http.API.URLPrefix = config.Config.URLPrefix

@@ -310,7 +310,6 @@ func ContinuousDiscovery() {
 
 	discoveryTick := time.Tick(config.DiscoveryPollSeconds * time.Second)
 	instancePollTick := time.Tick(instancePollSecondsDuration())
-	caretakingTick := time.Tick(time.Minute)
 	recoveryTick := time.Tick(time.Duration(config.Config.RecoveryPollSeconds) * time.Second)
 	var snapshotTopologiesTick <-chan time.Time
 	if config.Config.SnapshotTopologiesIntervalHours > 0 {
@@ -338,34 +337,6 @@ func ContinuousDiscovery() {
 					go inst.RecordInstanceCoordinatesHistory()
 					go inst.UpdateClusterAliases()
 					go inst.ExpireDowntime()
-				}
-			}()
-		case <-caretakingTick:
-			// Various periodic internal maintenance tasks
-			go func() {
-				if atomic.LoadInt64(&isElectedNode) == 1 {
-					go inst.RecordInstanceBinlogFileHistory()
-					go inst.ForgetLongUnseenInstances()
-					go inst.ForgetUnseenInstancesDifferentlyResolved()
-					go inst.ForgetExpiredHostnameResolves()
-					go inst.DeleteInvalidHostnameResolves()
-					go inst.ReviewUnseenInstances()
-					go inst.InjectUnseenMasters()
-					go inst.ResolveUnknownMasterHostnameResolves()
-					go inst.ExpireMaintenance()
-					go inst.ExpireCandidateInstances()
-					go inst.ExpireHostnameUnresolve()
-					go inst.ExpireClusterDomainName()
-					go inst.ExpireAudit()
-					go inst.ExpireMasterPositionEquivalence()
-					go inst.ExpirePoolInstances()
-					go inst.FlushNontrivialResolveCacheToDatabase()
-					go process.ExpireNodesHistory()
-					go process.ExpireAccessTokens()
-					go process.ExpireAvailableNodes()
-				} else {
-					// Take this opportunity to refresh yourself
-					go inst.LoadHostnameResolveCache()
 				}
 			}()
 		case <-recoveryTick:
