@@ -76,6 +76,17 @@ var readInstanceCounter = metrics.NewCounter()
 var writeInstanceCounter = metrics.NewCounter()
 var backendWrites = collection.CreateOrReturnCollection(collection.BackendWrites)
 var instanceBufferedWriteMetrics = collection.CreateOrReturnCollection(collection.FlushInstanceWrites)
+var writeBufferWriteCount = metrics.NewCounter()
+var writeBufferErrorCount = metrics.NewCounter()
+var writeBufferInstanceErrors = metrics.NewCounter()
+var writeBufferInstanceWrites = metrics.NewHistogram(metrics.NewUniformSample(16384))
+var writeBufferLatency = metrics.NewTimer()
+var writeBufferInstanceFlushInterval = metrics.NewFunctionalGauge(func() int64 {
+	return int64(config.Config.InstanceFlushIntervalMilliseconds)
+})
+var writeBufferInstanceSizeMetric = metrics.NewFunctionalGauge(func() int64 {
+	return int64(config.Config.InstanceWriteBufferSize)
+})
 
 var emptyQuotesRegexp = regexp.MustCompile(`^""$`)
 
@@ -85,7 +96,13 @@ func init() {
 	metrics.Register("instance.read", readInstanceCounter)
 	metrics.Register("instance.write", writeInstanceCounter)
 
-	InitWriteBufferMetrics()
+	metrics.Register("write_buffer.write_count", writeBufferWriteCount)
+	metrics.Register("write_buffer.error_count", writeBufferErrorCount)
+	metrics.Register("write_buffer.instance_errors", writeBufferInstanceErrors)
+	metrics.Register("write_buffer.instance_writes", writeBufferInstanceWrites)
+	metrics.Register("write_buffer.write_latency", writeBufferLatency)
+	metrics.Register("constant.write_buffer.instance_flush_interval", writeBufferInstanceFlushInterval)
+	metrics.Register("constant.write_buffer.instance_write_buffer_size", writeBufferInstanceSizeMetric)
 
 	go initializeInstanceDao()
 }
@@ -2417,41 +2434,51 @@ func flushInstanceWriteBuffer() {
 
 	wbm := NewWriteBufferMetric() // prepare metric
 
-	for i := 0; i < len(instanceWriteBuffer); i++ {
-		upd := <-instanceWriteBuffer
-		if upd.instanceWasActuallyFound && upd.lastError == nil {
-			lastseen = append(lastseen, upd.instance)
-		} else {
-			instances = append(instances, upd.instance)
-			log.Debugf("flushInstanceWriteBuffer: will not update database_instance.last_seen due to error: %+v", upd.lastError)
+	writeBufferLatency.Time(func() {
+		for i := 0; i < len(instanceWriteBuffer); i++ {
+			upd := <-instanceWriteBuffer
+			if upd.instanceWasActuallyFound && upd.lastError == nil {
+				lastseen = append(lastseen, upd.instance)
+			} else {
+				instances = append(instances, upd.instance)
+				log.Debugf("flushInstanceWriteBuffer: will not update database_instance.last_seen due to error: %+v", upd.lastError)
+			}
 		}
-	}
-	// sort instances by instanceKey (table pk) to make locking predictable
-	sort.Sort(byInstanceKey(instances))
-	sort.Sort(byInstanceKey(lastseen))
+		// sort instances by instanceKey (table pk) to make locking predictable
+		sort.Sort(byInstanceKey(instances))
+		sort.Sort(byInstanceKey(lastseen))
 
-	writeFunc := func() error {
-		err := writeManyInstances(instances, true, false)
+		writeFunc := func() error {
+			err := writeManyInstances(instances, true, false)
+			if err != nil {
+				return log.Errorf("flushInstanceWriteBuffer writemany: %v", err)
+			}
+			writeInstanceCounter.Inc(int64(len(instances)))
+
+			err = writeManyInstances(lastseen, true, true)
+			if err != nil {
+				return log.Errorf("flushInstanceWriteBuffer last_seen: %v", err)
+			}
+
+			writeInstanceCounter.Inc(int64(len(lastseen)))
+			return nil
+		}
+		err := ExecDBWriteFunc(writeFunc)
 		if err != nil {
-			return log.Errorf("flushInstanceWriteBuffer writemany: %v", err)
+			log.Errorf("flushInstanceWriteBuffer: %v", err)
 		}
-		writeInstanceCounter.Inc(int64(len(instances)))
 
-		err = writeManyInstances(lastseen, true, true)
+		writeBufferInstanceWrites.Update(int64(len(instances) + len(lastseen)))
+		writeBufferWriteCount.Inc(1)
+
 		if err != nil {
-			return log.Errorf("flushInstanceWriteBuffer last_seen: %v", err)
+			writeBufferErrorCount.Inc(1)
+			writeBufferInstanceErrors.Inc(int64(len(instances) + len(lastseen)))
 		}
 
-		writeInstanceCounter.Inc(int64(len(lastseen)))
-		return nil
-	}
-	err := ExecDBWriteFunc(writeFunc)
-	if err != nil {
-		log.Errorf("flushInstanceWriteBuffer: %v", err)
-	}
-
-	wbm.Update(len(instances)+len(lastseen), err)
-	instanceBufferedWriteMetrics.Append(wbm)
+		wbm.Update(len(instances)+len(lastseen), err)
+		instanceBufferedWriteMetrics.Append(wbm)
+	})
 }
 
 // WriteInstance stores an instance in the orchestrator backend
