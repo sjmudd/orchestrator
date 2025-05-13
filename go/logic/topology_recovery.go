@@ -974,7 +974,7 @@ func checkAndRecoverDeadMaster(analysisEntry inst.ReplicationAnalysis, candidate
 			// Execute post master-failover processes
 			// - if policy dictates and these processes fail then push the failure to the caller.
 			processesErr := executeProcesses(config.Config.PostMasterFailoverProcesses, "PostMasterFailoverProcesses", topologyRecovery, false)
-			if config.Config.PostMasterFailoverProcessesFailureConsideredFailure {
+			if processesErr != nil && config.Config.PostMasterFailoverProcessesFailureConsideredFailure {
 				err = processesErr
 			}
 		}
