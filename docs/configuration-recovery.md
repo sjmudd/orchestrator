@@ -71,6 +71,7 @@ These hooks are available for recoveries:
 - `PreFailoverProcesses`: executed immediately before `orchestrator` takes recovery action. Failure (nonzero exit code) of any of these processes aborts the recovery.
   Hint: this gives you the opportunity to abort recovery based on some internal state of your system.
 - `PostMasterFailoverProcesses`: executed at the end of a successful master recovery.
+- `PostMasterFailoverProcessesFailureConsideredFailure`: to indicate if orchestrator should treat failures in `PostMasterFailoverProcesses` as an orchestrator failure.  This largely depends on whether these hooks are critical for the external infrastructure to continue working correctly.
 - `PostIntermediateMasterFailoverProcesses`: executed at the end of a successful intermediate master or replication 
   group member with replicas recovery.
 - `PostFailoverProcesses`: executed at the end of any successful recovery (including and adding to the above two).
