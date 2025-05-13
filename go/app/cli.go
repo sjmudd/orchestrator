@@ -1787,7 +1787,7 @@ func Cli(command string, strict bool, instance string, destination string, owner
 		// Help
 	case "help":
 		{
-			fmt.Fprintf(os.Stderr, availableCommandsUsage())
+			fmt.Fprint(os.Stderr, availableCommandsUsage())
 		}
 	default:
 		log.Fatalf("Unknown command: \"%s\". %s", command, availableCommandsUsage())
